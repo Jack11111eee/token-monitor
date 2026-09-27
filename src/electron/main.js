@@ -6782,6 +6782,8 @@ app.whenReady().then(() => {
     stopSyncCollector();
     await whenUsageHostsIdle();
     try {
+      // The agent may have started while the worker was stopping.
+      if (isExternalAgentActive()) return { ok: false, error: 'agentActive' };
       sessionUsageArchiveStore.clear();
       clearDailyHistoryArchive();
       usageTransform.reset();

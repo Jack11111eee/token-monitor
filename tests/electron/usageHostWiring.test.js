@@ -44,6 +44,8 @@ test('clearing the archive waits for a worker-hosted collector to exit first', (
   assert.ok(body.indexOf('stopLocalCollector()') >= 0 && body.indexOf('stopLocalCollector()') < wait);
   assert.ok(body.indexOf('stopSyncCollector()') >= 0 && body.indexOf('stopSyncCollector()') < wait);
   assert.ok(wait >= 0 && wait < clear, 'the worker must be gone before the archive is deleted');
+  const recheck = body.indexOf('isExternalAgentActive()', wait);
+  assert.ok(recheck > wait && recheck < clear, 'agent ownership is checked again after the wait');
 });
 
 test('a settings change reaches the running worker as soon as it is saved', () => {
