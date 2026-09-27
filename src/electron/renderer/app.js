@@ -11613,6 +11613,14 @@ const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComp
     providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
     providerColor: (id) => limitProviderColor(id),
     hasProviderMark: (id) => limitMarksWithIcon.has(id),
+    // The add menu offers the enabled providers that report nothing alongside the
+    // connected ones, so a quota-less provider can still be pinned. Ordered here
+    // rather than in the composer: the user's limits order is this file's to know,
+    // and re-deriving it there would be a second copy of the same rule.
+    enabledLimitProviders: () => limitProviderOrderApi
+      .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
+      .filter(({ id }) => enabledLimitProviderSet().has(id))
+      .map(({ id }) => id),
     maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
       ? accountIdentityApi.maskEmailAddress(email)
       : String(email || '')),
