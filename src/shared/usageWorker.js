@@ -109,6 +109,7 @@ parentPort.on('message', (message) => {
   }
   if (message?.type === 'transformSettings') {
     config.transformSettings = message.settings || {};
+    post({ type: 'transformSettingsApplied' });
     return;
   }
   if (message?.type === 'stop') void stop(message.options || {});

@@ -41,6 +41,11 @@ collector.startCollector = (options) => {
         return false;
       }
       if (reason === 'preview') options.onPreview?.(summary(), 'progress');
+      if (reason === 'busy') {
+        // Synchronous post-scan work: this thread handles no message meanwhile.
+        const until = Date.now() + 200;
+        while (Date.now() < until) { /* spin */ }
+      }
       tokens += 10;
       options.logger?.(`tick ${reason}`);
       options.onDiagnosticEvent?.({ subsystem: 'collector', code: 'scripted-tick' });

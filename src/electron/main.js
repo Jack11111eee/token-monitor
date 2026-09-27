@@ -6807,7 +6807,14 @@ app.whenReady().then(() => {
     applySettingsPatch,
     probeDeps: credentialProbeDeps
   });
-  ipcMain.handle('settings:update', (_event, patch) => applySettingsPatch(patch));
+  // Resolves only once a worker-hosted transform runs with the saved settings:
+  // pausing the session archive must not be reported done while the worker can
+  // still capture under the old value.
+  ipcMain.handle('settings:update', async (_event, patch) => {
+    const result = applySettingsPatch(patch);
+    await latestUsageHost?.transformSettingsApplied?.();
+    return result;
+  });
   // The settings:update body, named so a credential save persists through the
   // exact same normalization, runtime reconfigure and limit invalidation.
   function applySettingsPatch(patch) {

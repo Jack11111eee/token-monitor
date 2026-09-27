@@ -58,3 +58,10 @@ test('a settings change reaches the running worker as soon as it is saved', () =
   // Before the usage runtime is reconfigured, which only happens after the settle delay.
   assert.ok(update < body.indexOf('reconfigureUsageRuntimeForMode()'));
 });
+
+test('saving settings waits until a worker-hosted transform has applied them', () => {
+  const start = main.indexOf("ipcMain.handle('settings:update', async (_event, patch) => {");
+  assert.ok(start >= 0, 'settings:update handler not found or not async');
+  const body = main.slice(start, main.indexOf('\n  });', start));
+  assert.ok(body.indexOf('applySettingsPatch(patch)') < body.indexOf('await latestUsageHost?.transformSettingsApplied?.()'));
+});

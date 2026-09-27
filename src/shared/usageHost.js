@@ -107,6 +107,10 @@ function createUsageHostCoordinator(deps = {}) {
     let diagnostics = null;
     let archiveState = null;
     let sentTransformSettings = JSON.stringify(workerData.transformSettings);
+    // Resolvers for settings updates the worker has not confirmed yet, in the
+    // order they were sent.
+    const settingsAcks = [];
+    let settingsApplied = Promise.resolve();
     let nextCallId = 0;
     const pending = new Map();
     const queued = [];
@@ -188,6 +192,9 @@ function createUsageHostCoordinator(deps = {}) {
           else entry.resolve(message.value);
           return;
         }
+        case 'transformSettingsApplied':
+          settingsAcks.shift()?.();
+          return;
         case 'stopped':
           terminate();
           return;
@@ -205,6 +212,8 @@ function createUsageHostCoordinator(deps = {}) {
     function onExit(code) {
       if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
       worker = null;
+      // A worker that is gone captures nothing more under any settings.
+      for (const resolve of settingsAcks.splice(0)) resolve();
       if (stopped) settleRemaining();
       else fallBack(workerError || new Error(`usage worker exited unexpectedly (code ${code})`));
       resolveExit();
@@ -257,10 +266,8 @@ function createUsageHostCoordinator(deps = {}) {
       getArchiveState: () => (collector ? null : archiveState),
       // The settings the worker's transform reads can change without the
       // runtime being replaced, and a replacement waits out the reconfigure
-      // settle delay. Summaries the worker transforms after this message see
-      // the new values. One it is already transforming keeps the old ones, as it
-      // would in-process, where the settings save waits behind that tick. Before
-      // the worker starts this becomes its initial settings instead. After a
+      // settle delay, so the running worker is sent them directly. Before the
+      // worker starts they become its initial settings instead. After a
       // fallback the owner's own transform reads its settings live, so there is
       // nothing to send.
       updateTransformSettings(next = {}) {
@@ -268,9 +275,18 @@ function createUsageHostCoordinator(deps = {}) {
         const serialized = JSON.stringify(next);
         if (serialized === sentTransformSettings) return;
         sentTransformSettings = serialized;
-        if (worker) worker.postMessage({ type: 'transformSettings', settings: next });
-        else workerData.transformSettings = next;
+        if (!worker) {
+          workerData.transformSettings = next;
+          return;
+        }
+        worker.postMessage({ type: 'transformSettings', settings: next });
+        settingsApplied = new Promise((resolve) => settingsAcks.push(resolve));
       },
+      // Settles once the worker has applied the latest settings sent to it. The
+      // worker handles the message only after the work it is doing, so a
+      // summary it was already producing is captured before this settles, as
+      // it would be in-process, where the save itself waits behind that work.
+      transformSettingsApplied: () => settingsApplied,
       refreshClient: (clientId, refreshOptions = {}) => call('refreshClient', [clientId, refreshOptions]),
       tick: (reason = 'manual', tickOptions = {}) => call('tick', [reason, tickOptions]),
       // Synchronous like the collector's stop(): nothing this runtime reports

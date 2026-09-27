@@ -417,6 +417,32 @@ test('pausing the session archive stops a running worker capturing from the next
   assert.equal(readSessionUsageArchiveSnapshot().sessions['codex:paused'].periods.allTime.totalTokens, 110);
 });
 
+test('a settings change is confirmed only after the capture the worker was already producing', async () => {
+  const coordinator = createUsageHostCoordinator({ workerPath: SCRIPTED_WORKER });
+  const { events, options } = recorder();
+  const runtime = coordinator.create({ ...options, scriptedSessionId: 'in-flight' }, {
+    transformSettings: { sessionUsageArchiveEnabled: true },
+    agentPidPath: path.join(sharedDir, 'no-agent.pid')
+  });
+  await runtime.tick('watch');
+  const updatesBefore = events.filter(([kind]) => kind === 'update').length;
+
+  // The worker is inside a tick's synchronous post-scan work when the archive
+  // is paused, so the pause reaches it only after that tick has captured.
+  const busy = runtime.tick('busy');
+  runtime.updateTransformSettings({ sessionUsageArchiveEnabled: false });
+  await runtime.transformSettingsApplied();
+
+  assert.equal(events.filter(([kind]) => kind === 'update').length, updatesBefore + 1);
+  assert.equal(await busy, true);
+  await runtime.tick('watch');
+  runtime.stop();
+  await runtime.whenIdle();
+  // 110, then 120 by the in-flight tick before the pause was confirmed; the
+  // tick after it (130) was not captured.
+  assert.equal(readSessionUsageArchiveSnapshot().sessions['codex:in-flight'].periods.allTime.totalTokens, 120);
+});
+
 test('a real worker that crashes hands its pending call to this thread', async () => {
   const inProcess = fakeInProcessCollector();
   const coordinator = createUsageHostCoordinator({ workerPath: SCRIPTED_WORKER, startCollector: inProcess.startCollector });
