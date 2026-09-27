@@ -3,7 +3,11 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createUsageTransform } = require('../../src/shared/usageTransform');
+const {
+  USAGE_TRANSFORM_SETTING_KEYS,
+  createUsageTransform,
+  usageTransformSettings
+} = require('../../src/shared/usageTransform');
 const { normalizePeriod } = require('../../src/shared/usage');
 
 const AT = '2026-07-09T08:15:00.000Z';
@@ -150,4 +154,24 @@ test('forget and reset decide what the next use sees', () => {
   assert.equal(transform.getState().loaded, false);
   transform.ensureLoaded();
   assert.deepEqual(store.calls, ['read']);
+});
+
+test('the transform reads no setting outside the ones a worker is handed', () => {
+  const read = new Set();
+  const settings = new Proxy({ projectsEnabled: true }, {
+    get(target, key) {
+      if (typeof key === 'string') read.add(key);
+      return target[key];
+    }
+  });
+  const transform = createUsageTransform({ store: fakeStore(), getSettings: () => settings });
+
+  transform.transform(summary());
+  transform.project(summary(), null, new Date(AT));
+
+  assert.deepEqual([...read].filter((key) => !USAGE_TRANSFORM_SETTING_KEYS.includes(key)), []);
+  assert.deepEqual(
+    usageTransformSettings({ clients: 'codex', projectsEnabled: false, hubUrl: 'https://hub', secret: 'x' }),
+    { clients: 'codex', projectsEnabled: false }
+  );
 });

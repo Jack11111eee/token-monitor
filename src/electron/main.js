@@ -92,6 +92,7 @@ const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { actionWindowForEvent, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
+const { externalAgentActive } = require('../shared/agentPid');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
 const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
@@ -244,7 +245,8 @@ const {
   createSessionUsageArchiveStore,
   sessionUsageArchiveDatabasePath
 } = require('../shared/sessionUsageArchiveStore');
-const { createUsageTransform } = require('../shared/usageTransform');
+const { createUsageTransform, usageTransformSettings } = require('../shared/usageTransform');
+const { createUsageHost, whenUsageHostsIdle } = require('../shared/usageHost');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
 const { aggregateDevices, aggregateHistory } = require('../shared/usage');
 const {
@@ -2660,6 +2662,19 @@ const usageTransform = createUsageTransform({
   onCaptureFailure: () => diagnosticJournal.record({ subsystem: 'storage', code: 'storage-archive-update-failed' })
 });
 
+// The usage runtime every device runtime starts. With TOKEN_MONITOR_USAGE_WORKER
+// set, collection and the transform run on a worker thread (usageHost.js) and
+// summaries arrive transformed; otherwise it is the in-process collector and
+// `usageTransform` above runs on this thread, as it also does if the worker fails.
+let latestUsageHost = null;
+function createElectronUsageRuntime(options) {
+  latestUsageHost = createUsageHost(options, {
+    agentPidPath: AGENT_PID_PATH,
+    transformSettings: usageTransformSettings(settings)
+  });
+  return latestUsageHost;
+}
+
 function applyMacActivationPolicy(state = {}) {
   if (process.platform !== 'darwin') return;
   const mainWindowVisible = state.mainWindowVisible !== undefined
@@ -2998,7 +3013,7 @@ const diagnosticSnapshotBuilder = createDiagnosticSnapshotBuilder({
   getJournalSnapshot: () => diagnosticJournal.getSnapshot(),
   getArchiveState: () => {
     const enabled = settings?.sessionUsageArchiveEnabled !== false;
-    const { loaded, sessionCount, lastUpdate } = usageTransform.getState();
+    const { loaded, sessionCount, lastUpdate } = latestUsageHost?.getArchiveState?.() || usageTransform.getState();
     return {
       enabled,
       loaded,
@@ -3208,13 +3223,7 @@ async function stopEmbeddedHub() {
 }
 
 function isExternalAgentActive() {
-  try {
-    const raw = fs.readFileSync(AGENT_PID_PATH, 'utf8').trim();
-    const pid = parseInt(raw, 10);
-    if (!pid || pid === process.pid) return false;
-    process.kill(pid, 0);
-    return true;
-  } catch (_) { return false; }
+  return externalAgentActive(AGENT_PID_PATH);
 }
 
 function ownsUsageRuntime() {
@@ -3839,6 +3848,7 @@ function startSyncCollector() {
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
   }, {
+    createUsageRuntime: createElectronUsageRuntime,
     limitsDeps: electronLimitsDeps()
   });
   usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
@@ -3887,6 +3897,7 @@ function startHostCollector() {
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
   }, {
+    createUsageRuntime: createElectronUsageRuntime,
     limitsDeps: electronLimitsDeps()
   });
   usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
@@ -4432,6 +4443,7 @@ function startLocalCollector() {
     onDiagnosticEvent: recordDiagnosticEvent,
     onError: (error, reason) => sendStatus(false, { reason: `${reason}:${error.message}` })
   }, {
+    createUsageRuntime: createElectronUsageRuntime,
     limitsDeps: electronLimitsDeps()
   });
   usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
@@ -6762,8 +6774,13 @@ app.whenReady().then(() => {
       throw new Error(subscriptionWriteFailureCode(error), { cause: error });
     }
   });
-  ipcMain.handle('sessionUsageArchive:clear', () => {
+  ipcMain.handle('sessionUsageArchive:clear', async () => {
     if (isExternalAgentActive()) return { ok: false, error: 'agentActive' };
+    // A worker-hosted collector writes both archives from its own thread, so it
+    // has to be gone before they are deleted or its next tick writes them back.
+    stopLocalCollector();
+    stopSyncCollector();
+    await whenUsageHostsIdle();
     try {
       sessionUsageArchiveStore.clear();
       clearDailyHistoryArchive();

@@ -55,6 +55,14 @@ On Windows, `src/shared/wslUsage.js` also scans **running** WSL distros. It gate
 
 A failed usage reconfiguration rolls back to the last-known-good runtime and retries the latest desired settings on a bounded backoff, emitting `usage-reconfigure-exhausted` when the budget runs out. A newer setting starts a fresh budget.
 
+### Usage worker
+
+With `TOKEN_MONITOR_USAGE_WORKER=1` (opt-in for now), the widget runs the collector, the usage transform (`src/shared/usageTransform.js`) and the session archive writer on a worker thread through `src/shared/usageHost.js`, so a tick's post-scan work and a full scan's transcript reads do not stall the main process. Summaries arrive already transformed (`onUpdate(summary, reason, { transformed: true })`) and `DeviceRuntime` skips its own transform for them.
+
+- One worker at a time: a replacement starts only after the previous worker has exited, so two collectors never overlap their scans, watcher descriptor sets or archive writes. Clearing the archive stops the runtime and waits for the same exit.
+- The worker is handed the transform's settings as data, `USAGE_TRANSFORM_SETTING_KEYS`. A setting the transform starts reading has to be added there, or the worker transforms without it.
+- A worker that fails emits `usage-worker-failed` and falls back to the in-process collector, and later runtimes stay in-process for the rest of the process.
+
 ## Limits collector
 
 `src/shared/deviceRuntime.js` runs usage and limits independently: `UsageRuntime` owns the tokscale collector, `LimitsRuntime` owns refresh timing, bounded concurrency, per-provider latest-wins lanes, deadlines, retry/backoff and `lastGood`/`lastAttempt` retention. A credential change refreshes only its limits lane and never restarts usage, unless a provider note says otherwise (Cursor forces one targeted usage sync).

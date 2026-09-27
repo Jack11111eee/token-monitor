@@ -1,0 +1,47 @@
+'use strict';
+
+// With TOKEN_MONITOR_USAGE_WORKER set, the collector, the transform and the
+// session archive writer run on a worker thread (tests/shared/usageHost.test.js
+// covers the host itself). main.js cannot be required outside Electron, so these
+// pin the wiring that decides whether every runtime actually goes through it.
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const ROOT = path.resolve(__dirname, '../..');
+const main = fs.readFileSync(path.join(ROOT, 'src/electron/main.js'), 'utf8');
+
+test('every device runtime starts its usage runtime through the usage host', () => {
+  const runtimes = main.match(/createDeviceRuntime\(\{/g) || [];
+  const hosted = main.match(/createUsageRuntime: createElectronUsageRuntime,/g) || [];
+  assert.ok(runtimes.length > 0);
+  assert.equal(hosted.length, runtimes.length);
+});
+
+test('the worker is handed the agent PID file and exactly the settings the transform reads', () => {
+  const start = main.indexOf('function createElectronUsageRuntime(');
+  assert.ok(start >= 0, 'createElectronUsageRuntime not found');
+  const body = main.slice(start, main.indexOf('\n}\n', start));
+  assert.match(body, /agentPidPath: AGENT_PID_PATH/);
+  assert.match(body, /transformSettings: usageTransformSettings\(settings\)/);
+});
+
+test('archive diagnostics come from the worker while it owns the archive', () => {
+  const start = main.indexOf('getArchiveState: () => {');
+  assert.ok(start >= 0, 'getArchiveState not found');
+  const body = main.slice(start, main.indexOf('\n  },', start));
+  assert.match(body, /latestUsageHost\?\.getArchiveState\?\.\(\) \|\| usageTransform\.getState\(\)/);
+});
+
+test('clearing the archive waits for a worker-hosted collector to exit first', () => {
+  const start = main.indexOf("ipcMain.handle('sessionUsageArchive:clear', async () => {");
+  assert.ok(start >= 0, 'clear handler not found or not async');
+  const body = main.slice(start, main.indexOf('\n  });', start));
+  const wait = body.indexOf('await whenUsageHostsIdle()');
+  const clear = body.indexOf('sessionUsageArchiveStore.clear()');
+  assert.ok(body.indexOf('stopLocalCollector()') >= 0 && body.indexOf('stopLocalCollector()') < wait);
+  assert.ok(body.indexOf('stopSyncCollector()') >= 0 && body.indexOf('stopSyncCollector()') < wait);
+  assert.ok(wait >= 0 && wait < clear, 'the worker must be gone before the archive is deleted');
+});

@@ -9,6 +9,23 @@ const {
 const { readSessionUsageArchiveSnapshot } = require('./sessionUsageArchiveStore');
 const { applyProjectRollups } = require('./usage');
 
+// Every setting project() and transform() read. A transform running on another
+// thread is handed exactly these (see usageTransformSettings).
+const USAGE_TRANSFORM_SETTING_KEYS = Object.freeze([
+  'archivedClientUsage',
+  'clients',
+  'projectsEnabled',
+  'sessionUsageArchiveEnabled'
+]);
+
+function usageTransformSettings(settings = {}) {
+  const picked = {};
+  for (const key of USAGE_TRANSFORM_SETTING_KEYS) {
+    if (settings?.[key] !== undefined) picked[key] = settings[key];
+  }
+  return picked;
+}
+
 // The widget's usage transform: every collected summary passes through here on
 // its way to DeviceState. It owns the in-memory session archive and reads the
 // settings it depends on through `getSettings()` at call time, so it holds no
@@ -124,5 +141,7 @@ function createUsageTransform(options = {}) {
 }
 
 module.exports = {
-  createUsageTransform
+  USAGE_TRANSFORM_SETTING_KEYS,
+  createUsageTransform,
+  usageTransformSettings
 };
