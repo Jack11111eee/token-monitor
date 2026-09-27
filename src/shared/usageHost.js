@@ -257,15 +257,19 @@ function createUsageHostCoordinator(deps = {}) {
       getArchiveState: () => (collector ? null : archiveState),
       // The settings the worker's transform reads can change without the
       // runtime being replaced, and a replacement waits out the reconfigure
-      // settle delay. The worker applies this before any later summary: calls
-      // and settings share one ordered port. After a fallback the owner's own
-      // transform reads its settings live, so there is nothing to send.
+      // settle delay. Summaries the worker transforms after this message see
+      // the new values. One it is already transforming keeps the old ones, as it
+      // would in-process, where the settings save waits behind that tick. Before
+      // the worker starts this becomes its initial settings instead. After a
+      // fallback the owner's own transform reads its settings live, so there is
+      // nothing to send.
       updateTransformSettings(next = {}) {
         if (collector || stopped) return;
         const serialized = JSON.stringify(next);
         if (serialized === sentTransformSettings) return;
         sentTransformSettings = serialized;
-        send({ type: 'transformSettings', settings: next });
+        if (worker) worker.postMessage({ type: 'transformSettings', settings: next });
+        else workerData.transformSettings = next;
       },
       refreshClient: (clientId, refreshOptions = {}) => call('refreshClient', [clientId, refreshOptions]),
       tick: (reason = 'manual', tickOptions = {}) => call('tick', [reason, tickOptions]),

@@ -184,25 +184,28 @@ test('calls made before the worker starts are delivered once it does', async () 
   await assert.rejects(refresh, (error) => error instanceof TypeError && /nope/.test(error.message));
 });
 
-test('transform settings reach a running worker in order with its calls, once per change', async () => {
+test('transform settings reach the worker once per change, as its initial settings if it has not started', async () => {
   FakeWorker.reset();
   const coordinator = createUsageHostCoordinator({ Worker: FakeWorker });
   const runtime = coordinator.create(recorder().options, { transformSettings: { sessionUsageArchiveEnabled: true } });
 
   runtime.updateTransformSettings({ sessionUsageArchiveEnabled: true });
   runtime.updateTransformSettings({ sessionUsageArchiveEnabled: false });
-  runtime.updateTransformSettings({ sessionUsageArchiveEnabled: false });
-  void runtime.tick('watch');
   await flush();
 
-  // Queued before the worker started, delivered in order: the tick after the
-  // change is transformed with the new settings.
-  assert.deepEqual(FakeWorker.last().posted.map((message) => message.type), ['transformSettings', 'call']);
-  assert.deepEqual(FakeWorker.last().posted[0].settings, { sessionUsageArchiveEnabled: false });
+  // Not started yet: the worker starts with the new settings, so not even its
+  // startup tick can see the old ones.
+  const worker = FakeWorker.last();
+  assert.deepEqual(worker.workerData.transformSettings, { sessionUsageArchiveEnabled: false });
+  assert.deepEqual(worker.posted, []);
+
+  runtime.updateTransformSettings({ sessionUsageArchiveEnabled: false });
+  runtime.updateTransformSettings({ sessionUsageArchiveEnabled: true });
+  assert.deepEqual(worker.posted, [{ type: 'transformSettings', settings: { sessionUsageArchiveEnabled: true } }]);
 
   runtime.stop();
-  runtime.updateTransformSettings({ sessionUsageArchiveEnabled: true });
-  assert.equal(FakeWorker.last().posted.filter((message) => message.type === 'transformSettings').length, 1);
+  runtime.updateTransformSettings({ sessionUsageArchiveEnabled: false });
+  assert.equal(worker.posted.filter((message) => message.type === 'transformSettings').length, 1);
 });
 
 test('stop asks the worker to stop its collector, then terminates it once it has', async () => {
