@@ -19,6 +19,13 @@ const {
 const { readSessionUsageArchiveSnapshot } = require('../../src/shared/sessionUsageArchiveStore');
 
 const SCRIPTED_WORKER = path.join(__dirname, '..', 'fixtures', 'usageWorkerScriptedCollector.js');
+
+// The host unrefs its worker and its stop timer so neither holds a process open.
+// Nothing else here keeps the event loop alive while a test waits on them, and
+// the Node 22 runner then cancels that test as unfinished.
+let keepAlive = null;
+test.before(() => { keepAlive = setInterval(() => {}, 1000); });
+test.after(() => clearInterval(keepAlive));
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
 // Records what the host does to a worker without spawning a thread, so the
