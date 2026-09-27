@@ -184,6 +184,27 @@ test('calls made before the worker starts are delivered once it does', async () 
   await assert.rejects(refresh, (error) => error instanceof TypeError && /nope/.test(error.message));
 });
 
+test('transform settings reach a running worker in order with its calls, once per change', async () => {
+  FakeWorker.reset();
+  const coordinator = createUsageHostCoordinator({ Worker: FakeWorker });
+  const runtime = coordinator.create(recorder().options, { transformSettings: { sessionUsageArchiveEnabled: true } });
+
+  runtime.updateTransformSettings({ sessionUsageArchiveEnabled: true });
+  runtime.updateTransformSettings({ sessionUsageArchiveEnabled: false });
+  runtime.updateTransformSettings({ sessionUsageArchiveEnabled: false });
+  void runtime.tick('watch');
+  await flush();
+
+  // Queued before the worker started, delivered in order: the tick after the
+  // change is transformed with the new settings.
+  assert.deepEqual(FakeWorker.last().posted.map((message) => message.type), ['transformSettings', 'call']);
+  assert.deepEqual(FakeWorker.last().posted[0].settings, { sessionUsageArchiveEnabled: false });
+
+  runtime.stop();
+  runtime.updateTransformSettings({ sessionUsageArchiveEnabled: true });
+  assert.equal(FakeWorker.last().posted.filter((message) => message.type === 'transformSettings').length, 1);
+});
+
 test('stop asks the worker to stop its collector, then terminates it once it has', async () => {
   FakeWorker.reset();
   const coordinator = createUsageHostCoordinator({ Worker: FakeWorker });
@@ -371,6 +392,26 @@ test('a real worker transforms with the settings it was handed, not its own defa
   assert.equal(events.filter(([kind]) => kind === 'update').length, 1);
   runtime.stop();
   await runtime.whenIdle();
+});
+
+test('pausing the session archive stops a running worker capturing from the next summary on', async () => {
+  const coordinator = createUsageHostCoordinator({ workerPath: SCRIPTED_WORKER });
+  const { options } = recorder();
+  const runtime = coordinator.create({ ...options, scriptedSessionId: 'paused' }, {
+    transformSettings: { sessionUsageArchiveEnabled: true },
+    agentPidPath: path.join(sharedDir, 'no-agent.pid')
+  });
+
+  assert.equal(await runtime.tick('watch'), true);
+  const captured = runtime.getArchiveState().lastUpdate;
+  runtime.updateTransformSettings({ sessionUsageArchiveEnabled: false });
+  assert.equal(await runtime.tick('watch'), true);
+
+  assert.deepEqual(runtime.getArchiveState().lastUpdate, captured);
+  runtime.stop();
+  await runtime.whenIdle();
+  // The first tick captured 110 tokens; the one after the pause (120) was not.
+  assert.equal(readSessionUsageArchiveSnapshot().sessions['codex:paused'].periods.allTime.totalTokens, 110);
 });
 
 test('a real worker that crashes hands its pending call to this thread', async () => {

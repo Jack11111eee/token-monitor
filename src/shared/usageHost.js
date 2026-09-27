@@ -106,6 +106,7 @@ function createUsageHostCoordinator(deps = {}) {
     let workerError = null;
     let diagnostics = null;
     let archiveState = null;
+    let sentTransformSettings = JSON.stringify(workerData.transformSettings);
     let nextCallId = 0;
     const pending = new Map();
     const queued = [];
@@ -254,6 +255,18 @@ function createUsageHostCoordinator(deps = {}) {
       // once the in-process collector took over and the owner's own transform
       // is the one keeping it again.
       getArchiveState: () => (collector ? null : archiveState),
+      // The settings the worker's transform reads can change without the
+      // runtime being replaced, and a replacement waits out the reconfigure
+      // settle delay. The worker applies this before any later summary: calls
+      // and settings share one ordered port. After a fallback the owner's own
+      // transform reads its settings live, so there is nothing to send.
+      updateTransformSettings(next = {}) {
+        if (collector || stopped) return;
+        const serialized = JSON.stringify(next);
+        if (serialized === sentTransformSettings) return;
+        sentTransformSettings = serialized;
+        send({ type: 'transformSettings', settings: next });
+      },
       refreshClient: (clientId, refreshOptions = {}) => call('refreshClient', [clientId, refreshOptions]),
       tick: (reason = 'manual', tickOptions = {}) => call('tick', [reason, tickOptions]),
       // Synchronous like the collector's stop(): nothing this runtime reports

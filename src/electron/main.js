@@ -7000,6 +7000,10 @@ app.whenReady().then(() => {
       settings = previousSettingsState;
       throw error;
     }
+    // A worker-hosted transform holds its own copy of the settings it reads.
+    // Update it now rather than when the usage reconfigure settles: pausing the
+    // session archive must stop captures from the next summary on.
+    latestUsageHost?.updateTransformSettings?.(usageTransformSettings(settings));
     if (patch?.limitProviders !== undefined) initialLimitProvidersPending = false;
     if (JSON.stringify(settings.customModelPricing || []) !== previousCustomModelPricing) {
       regenerateTokscalePricing();

@@ -45,3 +45,14 @@ test('clearing the archive waits for a worker-hosted collector to exit first', (
   assert.ok(body.indexOf('stopSyncCollector()') >= 0 && body.indexOf('stopSyncCollector()') < wait);
   assert.ok(wait >= 0 && wait < clear, 'the worker must be gone before the archive is deleted');
 });
+
+test('a settings change reaches the running worker as soon as it is saved', () => {
+  const start = main.indexOf('function applySettingsPatch(');
+  assert.ok(start >= 0, 'applySettingsPatch not found');
+  const body = main.slice(start, main.indexOf('\n  }\n', start));
+  const save = body.indexOf('saveSettings({ throwOnError: true });');
+  const update = body.indexOf('latestUsageHost?.updateTransformSettings?.(usageTransformSettings(settings));');
+  assert.ok(save >= 0 && update > save, 'the worker is updated right after the settings are saved');
+  // Before the usage runtime is reconfigured, which only happens after the settle delay.
+  assert.ok(update < body.indexOf('reconfigureUsageRuntimeForMode()'));
+});

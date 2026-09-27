@@ -93,7 +93,9 @@ function call(message) {
 }
 
 async function stop(options) {
-  collector.stop(options);
+  // A throwing stop must still close the store and report back; the owner
+  // would otherwise only learn of the exit from its grace timer.
+  try { collector.stop(options); } catch (_) {}
   // The store is closed only once no tick is left to capture into it.
   try { await collector.whenIdle(); } catch (_) {}
   try { store.close(); } catch (_) {}
@@ -103,6 +105,10 @@ async function stop(options) {
 parentPort.on('message', (message) => {
   if (message?.type === 'call' && CALLS.has(message.method)) {
     call(message);
+    return;
+  }
+  if (message?.type === 'transformSettings') {
+    config.transformSettings = message.settings || {};
     return;
   }
   if (message?.type === 'stop') void stop(message.options || {});

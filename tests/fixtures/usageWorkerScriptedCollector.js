@@ -7,17 +7,20 @@
 // the message protocol — is the production code.
 
 const collector = require('../../src/shared/collector');
+const { normalizePeriod } = require('../../src/shared/usage');
 
 collector.startCollector = (options) => {
   let stopped = false;
   let ticks = 0;
   let tokens = 100;
+  const sessionId = options.scriptedSessionId || 'c1';
   const summary = () => {
-    const period = {
+    // Normalized like real collector output, which the transform relies on.
+    const period = normalizePeriod({
       totalTokens: tokens,
       clients: { codex: tokens },
-      sessions: { 'codex:c1': { client: 'codex', sessionId: 'c1', totalTokens: tokens } }
-    };
+      sessions: { [`codex:${sessionId}`]: { client: 'codex', sessionId, totalTokens: tokens } }
+    });
     return {
       deviceId: 'scripted',
       updatedAt: '2026-07-09T08:15:00.000Z',
