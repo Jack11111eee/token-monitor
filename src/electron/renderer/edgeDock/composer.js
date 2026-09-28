@@ -154,18 +154,12 @@
         }
         menu.append(group);
       };
-      const connected = connectedProviders();
-      section('settings.edgeDock.addLimits', connected
-        .map((provider) => ({ type: 'limit', provider, hiddenAccounts: [], showUsage: true }))
-        .filter((item) => !present.has(itemsApi.itemId(item))));
-      // Enabled but silent. A provider that reports no quota has no connected
-      // cell, and so no entry above either — which left a quota-less provider
-      // (an API-key Claude, say) with no way to reach the dock at all. The tray's
-      // provider picker has offered the same thing all along; see
-      // trayComposerProviderChoices in app.js.
-      section('settings.edgeDock.addLimitsUnavailable', pendingLimitProviders(
-        enabledLimitProviders?.() || [],
-        [...connected, ...items.filter((item) => item.type === 'limit').map((item) => item.provider)]
+      // Keep every enabled provider in one list and in the user's limits order.
+      // A provider without quota data can still be pinned; the menu need not
+      // label it as temporarily unavailable.
+      section('settings.edgeDock.addLimits', addableLimitProviders(
+        enabledLimitProviders?.() || connectedProviders(),
+        items.filter((item) => item.type === 'limit').map((item) => item.provider)
       ).map((provider) => ({ type: 'limit', provider, hiddenAccounts: [], showUsage: true })));
       section('settings.edgeDock.addUsage', itemsApi.STAT_METRICS
         .filter((metric) => metric !== itemsApi.SESSIONS_METRIC)
@@ -383,17 +377,16 @@
     return String(value || '').trim().toLowerCase();
   }
 
-  // Providers the user turned on that currently report nothing, in the order the
-  // Limits page lists them. `taken` is everything the add menu already offers or
-  // the dock already shows, so one provider can never be listed twice.
+  // Providers still available to add, in the order the Limits page lists them.
+  // `added` is what the dock already shows.
   //
   // A plain function rather than a few lines inside the menu because the menu is
   // DOM and this is the part worth testing: this rule is what decides whether a
   // provider with no quota can be pinned at all.
-  function pendingLimitProviders(enabled, taken) {
-    const skip = new Set((taken || []).map(normalizeProviderId));
+  function addableLimitProviders(enabled, added) {
+    const skip = new Set((added || []).map(normalizeProviderId));
     return (enabled || []).map(normalizeProviderId).filter((id) => id && !skip.has(id));
   }
 
-  return { createEdgeDockComposer, pendingLimitProviders };
+  return { createEdgeDockComposer, addableLimitProviders };
 });

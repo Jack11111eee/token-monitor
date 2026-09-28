@@ -5,52 +5,46 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { pendingLimitProviders } = require('../../src/electron/renderer/edgeDock/composer');
+const { addableLimitProviders } = require('../../src/electron/renderer/edgeDock/composer');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 
-// A provider that reports no quota has no cell in automatic mode and no entry in
-// the connected list, so before this the only way to pin one — an API-key Claude
-// being the case that surfaced it — was to hand-edit settings.json. The rule that
-// decides whether it can be pinned at all is the part worth testing; the menu
-// around it is DOM.
+// A provider that reports no quota has no cell in automatic mode. The add menu
+// still needs to offer it alongside the connected providers.
 test('a provider the user enabled but that reports nothing is still offered', () => {
   assert.deepEqual(
-    pendingLimitProviders(['claude', 'codex', 'cursor'], ['codex']),
+    addableLimitProviders(['claude', 'codex', 'cursor'], ['codex']),
     ['claude', 'cursor']
   );
 });
 
 test('the order is the one it was handed, so the menu follows the limits order', () => {
   assert.deepEqual(
-    pendingLimitProviders(['cursor', 'claude', 'codex'], []),
+    addableLimitProviders(['cursor', 'claude', 'codex'], []),
     ['cursor', 'claude', 'codex']
   );
 });
 
-test('nothing is listed twice: the connected and the already-added are both skipped', () => {
-  assert.deepEqual(pendingLimitProviders(['claude', 'codex'], ['codex', 'claude']), []);
+test('providers already added to the dock are skipped', () => {
+  assert.deepEqual(addableLimitProviders(['claude', 'codex'], ['codex', 'claude']), []);
 });
 
 test('ids are compared case-insensitively, so a cased entry cannot double up', () => {
-  assert.deepEqual(pendingLimitProviders(['Claude', 'codex'], ['CLAUDE']), ['codex']);
+  assert.deepEqual(addableLimitProviders(['Claude', 'codex'], ['CLAUDE']), ['codex']);
 });
 
 test('nothing enabled and nothing left both yield an empty section', () => {
-  assert.deepEqual(pendingLimitProviders([], ['codex']), []);
-  assert.deepEqual(pendingLimitProviders(undefined, undefined), []);
-  assert.deepEqual(pendingLimitProviders(['claude'], ['claude']), []);
+  assert.deepEqual(addableLimitProviders([], ['codex']), []);
+  assert.deepEqual(addableLimitProviders(undefined, undefined), []);
+  assert.deepEqual(addableLimitProviders(['claude'], ['claude']), []);
 });
 
 // The rule above is only worth anything if the menu asks it: a helper that exists
 // but is never wired would pass every test above and still leave the gap open.
-test('the add menu offers the enabled-but-silent providers as their own section', () => {
+test('the add menu offers all enabled providers in one limits section', () => {
   const composer = fs.readFileSync(path.join(rendererDir, 'edgeDock', 'composer.js'), 'utf8');
-  assert.match(composer, /section\('settings\.edgeDock\.addLimitsUnavailable'/);
-  assert.match(composer, /pendingLimitProviders\(\s*enabledLimitProviders\?\.\(\) \|\| \[\],/);
-  // The section must not be gated on the connected list, which is what hid these
-  // providers in the first place.
-  assert.doesNotMatch(composer, /section\('settings\.edgeDock\.addLimitsUnavailable', connectedProviders\(\)/);
+  assert.match(composer, /section\('settings\.edgeDock\.addLimits', addableLimitProviders\(/);
+  assert.match(composer, /addableLimitProviders\(\s*enabledLimitProviders\?\.\(\) \|\| connectedProviders\(\),/);
 });
 
 test('the composer is handed the enabled providers in the user\'s limits order', () => {
